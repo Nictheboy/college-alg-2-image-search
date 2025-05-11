@@ -1,0 +1,31 @@
+[project]
+name = "ann_evaluator"
+version = "0.1.0"
+description = "Evaluate ANN search with KDTree and BBF-like approximation."
+dependencies = [
+    "datasets",         # For Hugging Face datasets
+    "transformers",     # For feature extraction models
+    "torch",            # Required by transformers
+    "torchvision",      # For image transforms if needed with torch
+    "Pillow",           # For image loading and manipulation
+    "scipy",            # For KDTree
+    "numpy",            # For numerical operations
+    "matplotlib",       # For plotting
+    "scikit-learn",     # For cosine_similarity (alternative) and normalization
+    "tqdm",             # For progress bars
+]
+
+[project.scripts]
+run-evaluation = "main:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv]
+# uv is a package manager, no specific config needed here for basic use
+# but good to acknowledge it's being used for environment management.
+# To create an environment and install:
+# uv venv
+# source .venv/bin/activate (or .venv\Scripts\activate on Windows)
+# uv pip install -r requirements.txt (if you generate one) or uv pip install -e .
