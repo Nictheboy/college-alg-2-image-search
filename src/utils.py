@@ -85,7 +85,7 @@ def calculate_cosine_similarity_matrix(query_vectors, dataset_vectors):
     similarity_matrix = np.dot(query_vectors, dataset_vectors.T)
     return similarity_matrix
 
-def get_image_from_dataset_item(item, image_key='image'):
+def get_image_from_dataset_item(item, image_key='img'):
     """Extracts PIL image from a Hugging Face dataset item."""
     img = item[image_key]
     if not isinstance(img, Image.Image):

@@ -1,122 +1,148 @@
 import numpy as np
-from scipy.spatial import KDTree
 import time
 from tqdm import tqdm
 import os
 
 from src import config, utils
+from src.kdtree_bbf import build_kdtree, bbf_knn_search # Import custom KD-Tree and BBF
 
 def evaluate_ann_search(train_features, train_labels, query_features, query_labels):
     """
-    Builds KD-Tree, performs ANN search with varying `eps` (proxy for 't'),
+    Builds a custom KD-Tree, performs BBF ANN search with varying 't_max',
     and evaluates precision and similarity.
     """
-    eval_results_path = config.EVALUATION_RESULTS_DIR / f"{config.DATASET_NAME}_evaluation.pkl"
+    # Adjusted filename for BBF results
+    eval_results_filename = f"{config.DATASET_NAME}_evaluation_bbf_t_leaf{config.KDTREE_LEAF_SIZE}.pkl"
+    eval_results_path = config.EVALUATION_RESULTS_DIR / eval_results_filename
+    
     if os.path.exists(eval_results_path):
-        print("Evaluation results found. Loading from disk.")
+        print(f"BBF Evaluation results found ({eval_results_filename}). Loading from disk.")
         return utils.load_data(eval_results_path)
 
-    print("Building KD-Tree from training features...")
-    # For KDTree, Euclidean distance is typically used.
-    # Since we normalized features, Euclidean distance minimization is related to cosine similarity maximization.
-    # d_euc^2 = ||A-B||^2 = ||A||^2 - 2A.B + ||B||^2. If ||A||=||B||=1, then d_euc^2 = 2 - 2A.B.
-    # So minimizing Euclidean distance maximizes A.B (cosine similarity).
-    kdtree = KDTree(train_features)
-    print("KD-Tree built.")
+    print(f"Building custom KD-Tree from training features (leaf_size={config.KDTREE_LEAF_SIZE})...")
+    # train_features are already normalized. KD-Tree will use Euclidean distance.
+    custom_kdtree_root = build_kdtree(train_features, leaf_size=config.KDTREE_LEAF_SIZE)
+    
+    if custom_kdtree_root is None:
+        print("Error: KD-Tree construction failed (root is None). Check dataset or KDTREE_LEAF_SIZE.")
+        return []
+    print("Custom KD-Tree built.")
 
-    all_results = [] # Store results for each eps value
+    all_results = []
 
-    for eps_val in tqdm(config.EPS_VALUES, desc="Evaluating EPS values"):
-        total_search_time = 0
-        # Initialize accumulators for metrics
-        # precisions_at_k_prime[k_prime_idx] = sum_of_precisions_for_this_k_prime
-        # similarities_at_k_prime[k_prime_idx] = sum_of_avg_similarities_for_this_k_prime
-        precisions_at_k_prime_sum = [0.0] * len(config.K_PRIME_VALUES)
-        similarities_at_k_prime_sum = [0.0] * len(config.K_PRIME_VALUES)
+    for t_val in tqdm(config.T_VALUES, desc="Evaluating T_MAX values for BBF"):
+        total_search_time = 0.0
+        precisions_at_k_prime_sum = np.zeros(len(config.K_PRIME_VALUES))
+        similarities_at_k_prime_sum = np.zeros(len(config.K_PRIME_VALUES))
         num_queries = len(query_features)
+
+        if num_queries == 0:
+            print("No query features to evaluate.")
+            return []
 
         for i in range(num_queries):
             query_vec = query_features[i]
             query_label = query_labels[i]
 
             start_time = time.perf_counter()
-            # Perform ANN search. `p=2` for Euclidean distance.
-            # `k` is the number of nearest neighbors to find.
-            # `eps` > 0 enables BBF-like approximate search.
-            distances, indices = kdtree.query(query_vec, k=config.K_NEIGHBORS, eps=eps_val, p=2)
+            # Perform BBF ANN search
+            # bbf_knn_search returns SQUARED Euclidean distances and indices
+            distances_sq, indices = bbf_knn_search(
+                custom_kdtree_root,
+                train_features, # Pass the original dataset for fetching points by index
+                query_vec,
+                k=config.K_NEIGHBORS,
+                t_max=t_val
+            )
             search_time = time.perf_counter() - start_time
             total_search_time += search_time
-
-            # Ensure results are iterable even if k=1
-            if config.K_NEIGHBORS == 1:
-                # scipy returns scalars if k=1 and query is 1D
-                # but we query with single vector, so indices/distances are 1D arrays of length k
-                # no special handling needed for k=1 here if kdtree.query behaves consistently.
-                # However, if distances/indices are not array-like for k=1, wrap them.
-                if not hasattr(indices, '__iter__'): # Check if it's not iterable (e.g. a scalar)
-                    indices = [indices]
-                    distances = [distances]
-
-
-            retrieved_labels = train_labels[indices]
-            retrieved_features = train_features[indices] # These are already normalized
-
+            
+            indices = np.array(indices, dtype=int) # Ensure integer indices
+            
             for k_prime_idx, k_prime in enumerate(config.K_PRIME_VALUES):
-                # Consider only the top k_prime results
-                current_k_prime_indices = indices[:k_prime]
-                current_k_prime_labels = train_labels[current_k_prime_indices]
-                current_k_prime_features = train_features[current_k_prime_indices]
+                actual_retrieved_count = len(indices)
+                # Consider only the top k_prime results from what was found (up to K_NEIGHBORS)
+                # indices are already sorted by distance by bbf_knn_search
+                current_top_n = min(k_prime, actual_retrieved_count)
 
+                if current_top_n == 0:
+                    # Precision and similarity remain 0 for this k_prime if no results
+                    continue
+
+                current_k_prime_indices = indices[:current_top_n]
+                current_k_prime_labels = train_labels[current_k_prime_indices]
+                
                 # 1. Precision@k_prime
-                # Number of retrieved items with the same label as the query
                 correct_matches = np.sum(current_k_prime_labels == query_label)
-                precision = correct_matches / k_prime
+                # Precision is correct_matches / k_prime (the target number for this rank)
+                precision = correct_matches / k_prime 
                 precisions_at_k_prime_sum[k_prime_idx] += precision
 
                 # 2. Average Cosine Similarity@k_prime
-                # query_vec and current_k_prime_features are L2 normalized
-                # Cosine similarity = dot product
-                if current_k_prime_features.ndim == 1: # If k_prime = 1
-                     similarities = np.dot(current_k_prime_features, query_vec)
-                else:
-                    similarities = np.dot(current_k_prime_features, query_vec) # shape (k_prime,)
-
-                avg_similarity = np.mean(similarities) if similarities.size > 0 else 0.0
-                similarities_at_k_prime_sum[k_prime_idx] += avg_similarity
-
+                # query_vec and retrieved features are L2 normalized. Cosine sim = dot product.
+                retrieved_k_prime_features = train_features[current_k_prime_indices]
+                
+                similarities_values = np.array([])
+                if retrieved_k_prime_features.size > 0 :
+                    if retrieved_k_prime_features.ndim == 1: # Single neighbor found and k_prime=1
+                        similarities_values = np.array([np.dot(retrieved_k_prime_features, query_vec)])
+                    else: # Multiple neighbors
+                        similarities_values = np.dot(retrieved_k_prime_features, query_vec)
+                
+                avg_similarity_for_this_query_k_prime = np.mean(similarities_values) if similarities_values.size > 0 else 0.0
+                similarities_at_k_prime_sum[k_prime_idx] += avg_similarity_for_this_query_k_prime
 
         avg_search_time = total_search_time / num_queries
-        avg_precisions = [s / num_queries for s in precisions_at_k_prime_sum]
-        avg_similarities = [s / num_queries for s in similarities_at_k_prime_sum]
+        avg_precisions = precisions_at_k_prime_sum / num_queries
+        avg_similarities = similarities_at_k_prime_sum / num_queries
 
-        all_results.append({
-            "eps": eps_val,
+        # Store results for this t_val
+        result_entry = {
+            "t_max": t_val,
             "avg_search_time": avg_search_time,
-            "avg_precisions_at_k_prime": avg_precisions, # List, one for each K'
-            "avg_similarities_at_k_prime": avg_similarities # List, one for each K'
-        })
-        print(f"EPS: {eps_val:.2f}, Time: {avg_search_time:.6f}s, "
-              f"P@{config.K_PRIME_VALUES[-1]}: {avg_precisions[-1]:.3f}, "
-              f"Sim@{config.K_PRIME_VALUES[-1]}: {avg_similarities[-1]:.3f}")
+            "avg_precisions_at_k_prime": avg_precisions.tolist(),
+            "avg_similarities_at_k_prime": avg_similarities.tolist()
+        }
+        all_results.append(result_entry)
+
+        # Display info for K_NEIGHBORS (the largest K')
+        k_display_val = config.K_NEIGHBORS
+        try:
+            k_display_idx = config.K_PRIME_VALUES.index(k_display_val)
+            print(f"T_max: {t_val:3d}, Time: {avg_search_time:.5f}s, "
+                  f"P@{k_display_val}: {avg_precisions[k_display_idx]:.3f}, "
+                  f"Sim@{k_display_val}: {avg_similarities[k_display_idx]:.3f}")
+        except ValueError:
+            print(f"T_max: {t_val:3d}, Time: {avg_search_time:.5f}s (K_NEIGHBORS not in K_PRIME_VALUES for display)")
+
 
     utils.save_data(eval_results_path, all_results)
+    print(f"BBF Evaluation results saved to {eval_results_path}")
     return all_results
 
 if __name__ == '__main__':
-    # Example usage (requires data from step 1 and 2)
+    # Ensure dependent steps can run if this is executed standalone
     from src.step_1_download_data import download_and_prepare_dataset
     from src.step_2_extract_features import process_all_features
 
-    # Step 1: Download data
+    print("Running standalone Step 3: Evaluate BBF ANN Search")
     train_items, query_items, _ = download_and_prepare_dataset()
-
-    # Step 2: Extract features
     train_f, train_l, query_f, query_l = process_all_features(train_items, query_items)
 
-    # Step 3: Evaluate
-    results = evaluate_ann_search(train_f, train_l, query_f, query_l)
-    print("\nEvaluation complete. Results:")
-    for res in results:
-        print(f"Eps: {res['eps']}, Avg Time: {res['avg_search_time']:.5f}, "
-              f"Avg P@{config.K_NEIGHBORS}: {res['avg_precisions_at_k_prime'][-1]:.3f}, "
-              f"Avg Sim@{config.K_NEIGHBORS}: {res['avg_similarities_at_k_prime'][-1]:.3f}")
+    if train_f.size == 0 or query_f.size == 0:
+        print("No features found. Exiting evaluation.")
+    else:
+        results = evaluate_ann_search(train_f, train_l, query_f, query_l)
+        if results:
+            print("\nBBF Evaluation complete. Summary of results:")
+            for res in results:
+                k_disp_val = config.K_NEIGHBORS
+                try:
+                    k_disp_idx = config.K_PRIME_VALUES.index(k_disp_val)
+                    print(f"T_max: {res['t_max']:3d}, Avg Time: {res['avg_search_time']:.5f}, "
+                        f"Avg P@{k_disp_val}: {res['avg_precisions_at_k_prime'][k_disp_idx]:.3f}, "
+                        f"Avg Sim@{k_disp_val}: {res['avg_similarities_at_k_prime'][k_disp_idx]:.3f}")
+                except (ValueError, IndexError):
+                     print(f"T_max: {res['t_max']:3d}, Avg Time: {res['avg_search_time']:.5f} (Error displaying specific K' metrics)")
+        else:
+            print("No results from BBF evaluation.")

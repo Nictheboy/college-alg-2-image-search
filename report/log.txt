@@ -1,0 +1,54 @@
+Starting ANN Evaluation Pipeline (with Custom KD-Tree & BBF)...
+Using device: mps
+Dataset: cifar10, Model: google/vit-base-patch16-224-in21k
+Max train samples: 1000, Max query samples: 1000
+K (neighbors): 10
+BBF T_MAX values: [1, 2, 5, 10, 15, 20, 30, 50]
+Custom KD-Tree Leaf Size: 20
+
+--- Running Step 1: Download Data ---
+Downloading dataset: cifar10
+Number of classes: 10
+Class names: ['airplane', 'automobile', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck']
+Data saved to /Users/nictheboy/Documents/college-alg-2-image-search/data/1_downloaded_dataset/cifar10_train.pkl
+Data saved to /Users/nictheboy/Documents/college-alg-2-image-search/data/1_downloaded_dataset/cifar10_query.pkl
+Data saved to /Users/nictheboy/Documents/college-alg-2-image-search/data/1_downloaded_dataset/cifar10_class_names.pkl
+Train data: 1000 samples.
+Query data: 1000 samples.
+Number of classes found: 10
+
+--- Running Step 2: Extract Features ---
+Processing train set features...
+Extracting features using google/vit-base-patch16-224-in21k on mps...
+Saved normalized features to /Users/nictheboy/Documents/college-alg-2-image-search/data/2_feature_vectors/cifar10_train_features.npy
+Saved labels to /Users/nictheboy/Documents/college-alg-2-image-search/data/2_feature_vectors/cifar10_train_labels.npy
+Saved ids to /Users/nictheboy/Documents/college-alg-2-image-search/data/2_feature_vectors/cifar10_train_ids.npy
+Processing query set features...
+Extracting features using google/vit-base-patch16-224-in21k on mps...
+Saved normalized features to /Users/nictheboy/Documents/college-alg-2-image-search/data/2_feature_vectors/cifar10_query_features.npy
+Saved labels to /Users/nictheboy/Documents/college-alg-2-image-search/data/2_feature_vectors/cifar10_query_labels.npy
+Saved ids to /Users/nictheboy/Documents/college-alg-2-image-search/data/2_feature_vectors/cifar10_query_ids.npy
+Train features shape: (1000, 768), Train labels shape: (1000,)
+Query features shape: (1000, 768), Query labels shape: (1000,)
+
+--- Running Step 3: Evaluate BBF ANN Search ---
+Building custom KD-Tree from training features (leaf_size=20)...
+Custom KD-Tree built.
+T_max:   1, Time: 0.00663s, P@10: 0.506, Sim@10: 0.561
+T_max:   2, Time: 0.00739s, P@10: 0.751, Sim@10: 0.631
+T_max:   5, Time: 0.00836s, P@10: 0.881, Sim@10: 0.684
+T_max:  10, Time: 0.00907s, P@10: 0.908, Sim@10: 0.703
+T_max:  15, Time: 0.00944s, P@10: 0.917, Sim@10: 0.709
+T_max:  20, Time: 0.00992s, P@10: 0.918, Sim@10: 0.712
+T_max:  30, Time: 0.01022s, P@10: 0.919, Sim@10: 0.715
+T_max:  50, Time: 0.01074s, P@10: 0.920, Sim@10: 0.716
+Data saved to /Users/nictheboy/Documents/college-alg-2-image-search/data/3_evaluation_results_bbf/cifar10_evaluation_bbf_t_leaf20.pkl
+BBF Evaluation results saved to /Users/nictheboy/Documents/college-alg-2-image-search/data/3_evaluation_results_bbf/cifar10_evaluation_bbf_t_leaf20.pkl
+
+--- Running Step 4: Plot BBF Results ---
+Saved time plot to /Users/nictheboy/Documents/college-alg-2-image-search/data/4_plots_bbf/cifar10_LS20_time_vs_t_max.png
+Saved precision plot to /Users/nictheboy/Documents/college-alg-2-image-search/data/4_plots_bbf/cifar10_LS20_precision_vs_t_max.png
+Saved similarity plot to /Users/nictheboy/Documents/college-alg-2-image-search/data/4_plots_bbf/cifar10_LS20_similarity_vs_t_max.png
+All plots generated.
+
+Pipeline finished successfully!
